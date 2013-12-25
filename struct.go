@@ -25,7 +25,7 @@ func unmarshalPOD(pod interface{}, val reflect.Value) error {
 
 	v := val.Elem()
 	k := v.Type().Kind()
-	if k == reflect.Int64 &&  podk == reflect.Uint64 {
+	if k == reflect.Int64 && podk == reflect.Uint64 {
 		v.Set(reflect.ValueOf(int64(pod.(uint64))))
 		return nil
 	}
@@ -68,38 +68,37 @@ func unmarshalList(l []*RawMessage, v reflect.Value) (err error) {
 
 func unmarshalDict(d []*KV, val reflect.Value) (err error) {
 	kind := val.Type().Kind()
-	if  kind != reflect.Ptr && kind != reflect.Map {
-		return fmt.Errorf("not a Ptr/Map: %v", kind)
+	if kind != reflect.Ptr {
+		return fmt.Errorf("not a Ptr: %v", kind)
 	}
 
 	fields := map[string]reflect.Value{}
-	if kind == reflect.Ptr {
-		v := val.Elem()
-		typ := v.Type()
-		if typ.Kind() != reflect.Struct {
-			return fmt.Errorf("not a Struct: %v", typ.Kind())
+	v := val.Elem()
+	typ := v.Type()
+	if typ.Kind() != reflect.Struct {
+		return fmt.Errorf("not a Struct: %v", typ.Kind())
+	}
+
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if len(field.PkgPath) > 0 {
+			continue // unexported
 		}
 
-		for i := 0; i < typ.NumField(); i++ {
-			field := typ.Field(i)
-			if len(field.PkgPath) > 0 {
-				continue // unexported
+		key := field.Name
+		if len(field.Tag) > 0 {
+			tag := field.Tag.Get("ben")
+			if len(tag) > 0 {
+				key = tag
 			}
-
-			key := field.Name
-			if len(field.Tag) > 0 {
-				tag := field.Tag.Get("ben")
-				if len(tag) > 0 {
-					key = tag
-				}
-			}
-			fields[key] = v.Field(i)
 		}
+		fields[key] = v.Field(i)
 	}
 
 	for _, kv := range d {
 		var field reflect.Value
-		field, ok := fields[kv.K]
+		var ok bool
+		field, ok = fields[kv.K]
 		if !ok {
 			continue
 		}
@@ -115,14 +114,52 @@ func unmarshalDict(d []*KV, val reflect.Value) (err error) {
 		case len(rm.D) > 0:
 			if field.Type().Kind() == reflect.Map {
 				field.Set(reflect.MakeMap(field.Type()))
+				err = unmarshalMap(rm.D, field)
 			} else {
 				field.Set(reflect.New(field.Type().Elem()))
+				err = unmarshalDict(rm.D, field)
 			}
-			err = unmarshalDict(rm.D, field)
 		}
 		if err != nil {
 			return fmt.Errorf("field: %q: %v", kv.K, err)
 		}
+	}
+	return nil
+}
+
+func unmarshalMap(d []*KV, val reflect.Value) (err error) {
+	kind := val.Type().Kind()
+	if kind != reflect.Map {
+		return fmt.Errorf("not a Map: %v", kind)
+	}
+
+	typ := val.Type().Elem()
+	for _, kv := range d {
+		rm := kv.V
+		var field reflect.Value
+		switch {
+		case isRawMessagePtr(typ):
+			field = reflect.ValueOf(rm)
+		case rm.POD != nil:
+			field = reflect.New(typ)
+			err = unmarshalPOD(rm.POD, field)
+			field = reflect.Indirect(field)
+		case len(rm.L) > 0:
+			field = reflect.MakeSlice(typ, 0, 0)
+			err = unmarshalList(rm.L, field)
+		case len(rm.D) > 0:
+			if typ.Kind() == reflect.Map {
+				field = reflect.MakeMap(typ)
+				err = unmarshalMap(rm.D, field)
+			} else {
+				field = reflect.New(typ.Elem())
+				err = unmarshalDict(rm.D, field)
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("map: %q: %v", kv.K, err)
+		}
+		val.SetMapIndex(reflect.ValueOf(kv.K), field)
 	}
 	return nil
 }

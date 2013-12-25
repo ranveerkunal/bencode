@@ -226,7 +226,6 @@ func Unmarshal(r io.Reader, v interface{}) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(rm)
 	return rm.Unmarshal(v)
 }
 
