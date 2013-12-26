@@ -236,6 +236,38 @@ func marshalDict(val reflect.Value) (rm *RawMessage, err error) {
 			kv.V, err = marshalList(v.Field(i))
 		case reflect.Ptr:
 			kv.V, err = marshalDict(v.Field(i))
+		case reflect.Map:
+			kv.V, err = marshalMap(v.Field(i))
+		}
+		if err != nil {
+			return nil, err
+		}
+		if kv.V != nil {
+			rm.D = append(rm.D, kv)
+		}
+	}
+	return rm, nil
+}
+
+func marshalMap(val reflect.Value) (rm *RawMessage, err error) {
+	typ := val.Type()
+	if typ.Kind() != reflect.Map {
+		return nil, fmt.Errorf("not a Map: %v", typ.Kind())
+	}
+
+	rm = &RawMessage{}
+	for _, k := range val.MapKeys() {
+		kv := &KV{K: k.Interface().(string)}
+		v := val.MapIndex(k)
+		switch typ.Elem().Kind() {
+		case reflect.Int64, reflect.Uint64, reflect.String:
+			kv.V = marshalPOD(v)
+		case reflect.Slice:
+			kv.V, err = marshalList(v)
+		case reflect.Ptr:
+			kv.V, err = marshalDict(v)
+		case reflect.Map:
+			kv.V, err = marshalMap(v)
 		}
 		if err != nil {
 			return nil, err
